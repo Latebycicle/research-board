@@ -4,8 +4,39 @@
   <meta charset="UTF-8">
   <title>Research Board Popup</title>
   <script src="popup.js" defer></script>
+  <style>
+    body { width: 300px; padding: 10px; font-family: Arial, sans-serif; max-height: 600px; overflow: hidden; }
+    #website-list { margin-top: 15px; }
+    .website-item { padding: 8px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .website-item:hover { background-color: #f5f5f5; }
+    .website-title { font-weight: bold; color: #333; }
+    .website-url { font-size: 12px; color: #666; }
+    .item-count { color: #888; font-size: 14px; }
+    
+    /* Highlights section styles */
+    .highlights-section { margin-top: 20px; border-top: 2px solid #eee; padding-top: 15px; }
+    .highlights-title { font-weight: bold; color: #333; margin-bottom: 10px; font-size: 14px; }
+    .highlights-container { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; }
+    .highlight-item { padding: 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+    .highlight-item:last-child { border-bottom: none; }
+    .highlight-item:hover { background-color: #f9f9f9; }
+    .highlight-content { font-size: 13px; color: #444; margin-bottom: 5px; line-height: 1.4; }
+    .highlight-meta { font-size: 11px; color: #888; }
+    .highlight-type { background: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 3px; font-size: 10px; margin-right: 5px; }
+    .no-highlights { text-align: center; color: #999; padding: 20px; font-style: italic; }
+  </style>
 </head>
 <body>
-  <h1 id="welcome-message"></h1>
+  <h1 id="welcome-message">Research Board</h1>
+  <div class="item-count" id="item-count">Loading...</div>
+  <div id="website-list"></div>
+  
+  <!-- Highlights Section -->
+  <div class="highlights-section">
+    <div class="highlights-title" id="highlights-title">Recent Highlights</div>
+    <div class="highlights-container" id="highlights-container">
+      <div class="no-highlights">Loading highlights...</div>
+    </div>
+  </div>
 </body>
 </html>

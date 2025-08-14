@@ -1,17 +1,20 @@
 // --- Context Menu Setup ---
 // Create context menu items for selected text and images when the extension is installed or reloaded
 chrome.runtime.onInstalled.addListener(() => {
-  // For selected text
-  chrome.contextMenus.create({
-    id: 'remember-text',
-    title: 'Remember This',
-    contexts: ['selection']
-  });
-  // For images
-  chrome.contextMenus.create({
-    id: 'remember-image',
-    title: 'Remember This',
-    contexts: ['image']
+  // Remove all existing context menu items first to prevent duplicates
+  chrome.contextMenus.removeAll(() => {
+    // For selected text
+    chrome.contextMenus.create({
+      id: 'remember-text',
+      title: 'Remember This',
+      contexts: ['selection']
+    });
+    // For images
+    chrome.contextMenus.create({
+      id: 'remember-image',
+      title: 'Remember This',
+      contexts: ['image']
+    });
   });
 });
 
@@ -38,10 +41,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Save remembered item to local storage
 function saveRememberedItem(item) {
-  chrome.storage.local.get({ remembered: [] }, result => {
-    const remembered = result.remembered;
-    remembered.push(item);
-    chrome.storage.local.set({ remembered });
+  // Add priority/highlight tag to user-flagged items
+  const highlightedItem = {
+    ...item,
+    priority: true,
+    type: 'highlight',
+    originalType: item.type // Keep track of whether it was text or image
+  };
+  
+  // Store highlighted items with regular visits data for unified storage
+  chrome.storage.local.get({ visits: [] }, result => {
+    const visits = result.visits;
+    visits.push(highlightedItem);
+    chrome.storage.local.set({ visits });
+    console.log('Saved new highlighted item:', highlightedItem.originalType, highlightedItem.url);
     // Optionally, show a notification (requires notification permission)
     // chrome.notifications.create({
     //   type: 'basic',
@@ -54,6 +67,19 @@ function saveRememberedItem(item) {
 
 // background.js
 // Handles communication, PDF detection, browsing activity tracking, and storage
+
+// --- Duplicate Content Prevention ---
+// Track processed URLs for page data extraction to prevent duplicates during session
+const processedPageData = new Set(); // Only track page data URLs to prevent re-extraction
+
+// Check if page data for this URL has already been processed (for page data extraction only)
+function isPageDataDuplicate(url) {
+  if (processedPageData.has(url)) {
+    return true;
+  }
+  processedPageData.add(url);
+  return false;
+}
 
 // --- Browsing Activity Tracking ---
 let activeTabId = null;
@@ -107,7 +133,24 @@ function recordTimeSpent(tabId) {
 function saveVisit(visit) {
   chrome.storage.local.get({ visits: [] }, result => {
     const visits = result.visits;
-    visits.push(visit);
+    
+    // Check if there's an existing visit for this URL
+    const existingVisitIndex = visits.findIndex(v => v.url === visit.url && !v.priority);
+    
+    if (existingVisitIndex !== -1) {
+      // Consolidate time spent and increment visit count
+      visits[existingVisitIndex].timeSpentMs += visit.timeSpentMs;
+      visits[existingVisitIndex].visitCount = (visits[existingVisitIndex].visitCount || 1) + 1;
+      visits[existingVisitIndex].lastVisit = visit.timestamp;
+      console.log('Updated existing visit:', visit.url, 'Total time:', visits[existingVisitIndex].timeSpentMs);
+    } else {
+      // New visit - add visit count
+      visit.visitCount = 1;
+      visit.type = 'visit';
+      visits.push(visit);
+      console.log('Saved new visit:', visit.url);
+    }
+    
     chrome.storage.local.set({ visits });
   });
 }
@@ -135,14 +178,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Process and store page data
 function processPageData(data) {
-  // TODO: Store in SQLite via backend or extension DB
-  console.log('Received page data:', data);
+  // Check for duplicate page data before processing (skip on reload/revisit)
+  if (isPageDataDuplicate(data.url)) {
+    console.log('Skipping duplicate page data extraction for URL:', data.url);
+    return;
+  }
+  
+  // Add page data type for consistency
+  data.type = 'page_data';
+  
+  // Store page data separately or with visits (depending on your preference)
+  chrome.storage.local.get({ visits: [] }, result => {
+    const visits = result.visits;
+    visits.push(data);
+    chrome.storage.local.set({ visits });
+    console.log('Processing new page data:', data.url);
+    console.log('Recived Page Data', data);
+  });
 }
 
 // Process and store PDF data
 function processPDFData(data) {
-  // TODO: Store in SQLite via backend or extension DB
-  console.log('Received PDF data:', data);
+  // Check for duplicate PDF data before processing
+  if (isPageDataDuplicate(data.url)) {
+    console.log('Skipping duplicate PDF data extraction for URL:', data.url);
+    return;
+  }
+  
+  // Add PDF data type for consistency
+  data.type = 'pdf_data';
+  
+  // Store PDF data with visits
+  chrome.storage.local.get({ visits: [] }, result => {
+    const visits = result.visits;
+    visits.push(data);
+    chrome.storage.local.set({ visits });
+    console.log('Processing new PDF data:', data.url);
+  });
 }
 
 // Send PDF URL to local backend for processing
