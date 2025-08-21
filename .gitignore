@@ -1,0 +1,4 @@
+# Ignore the backend virtual environment directory
+/backend/venv
+backend/venv
+../backend/venv
