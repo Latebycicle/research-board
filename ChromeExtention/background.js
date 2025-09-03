@@ -162,64 +162,120 @@ function detectPDF(tabId, url) {
   }
 }
 
-// Listen for messages from content scripts
+// --- Research Board Backend Sync Logic ---
+const STORAGE_KEY = 'researchBoardPages';
+const SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Store minimal metadata in chrome.storage.local
+function storePageLocally(meta) {
+  chrome.storage.local.get([STORAGE_KEY], result => {
+    const pages = result[STORAGE_KEY] || [];
+    pages.push(meta);
+    chrome.storage.local.set({ [STORAGE_KEY]: pages });
+  });
+}
+
+// Remove synced or old items from local storage
+function cleanupLocalStorage() {
+  chrome.storage.local.get([STORAGE_KEY], result => {
+    let pages = result[STORAGE_KEY] || [];
+    const now = Date.now();
+    pages = pages.filter(page => {
+      // Remove if synced or older than MAX_AGE_MS
+      return !page.synced && (now - new Date(page.accessedAt).getTime() < MAX_AGE_MS);
+    });
+    chrome.storage.local.set({ [STORAGE_KEY]: pages });
+  });
+}
+
+// Try to sync pending items to backend
+function syncPendingPages() {
+  chrome.storage.local.get([STORAGE_KEY], result => {
+    const pages = result[STORAGE_KEY] || [];
+    pages.forEach(page => {
+      if (!page.synced && page.pendingData) {
+        sendDataToBackend(page.pendingData, (backendId) => {
+          page.synced = true;
+          page.backendId = backendId;
+          delete page.pendingData;
+          chrome.storage.local.set({ [STORAGE_KEY]: pages });
+        });
+      }
+    });
+  });
+}
+
+// Send data to backend API (with callback for backendId)
+function sendDataToBackend(data, onSuccess) {
+  console.log('[ResearchBoard] Sending to backend:', data);
+  fetch('http://127.0.0.1:8000/api/v1/collect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(data)
+  })
+  .then(response => response.json())
+  .then(result => {
+    console.log('[ResearchBoard] Backend response:', result);
+    if (result.success && result.page_id) {
+      if (onSuccess) onSuccess(result.page_id);
+    }
+  })
+  .catch(error => {
+    console.error('[ResearchBoard] Error sending data to backend:', error);
+    // If failed, queue for later upload
+    queueForLater(data);
+  });
+}
+
+// Queue data for later upload
+function queueForLater(data) {
+  const meta = {
+    title: data.title,
+    url: data.url,
+    preview: (data.text || '').slice(0, 200),
+    favicon: getFavicon(data),
+    accessedAt: data.accessedAt,
+    synced: false,
+    pendingData: data // Only keep reference, not large blobs in local storage
+  };
+  storePageLocally(meta);
+}
+
+// Get favicon URL from page data
+function getFavicon(data) {
+  return data.favicon || '';
+}
+
+// Handle PAGE_DATA messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'PAGE_DATA') {
-    // Handle standard web page data
-    processPageData(message.data);
-  } else if (message.type === 'PDF_DATA') {
-    // Handle PDF data
-    processPDFData(message.data);
-  } else if (message.type === 'PDF_URL_FOR_BACKEND') {
-    // Forward PDF URL to backend for processing
-    sendToBackend(message.url);
+  if (message.type === 'PAGE_DATA' && message.data) {
+    const data = message.data;
+    // Prepare minimal metadata
+    const meta = {
+      title: data.title,
+      url: data.url,
+      preview: (data.text || '').slice(0, 200),
+      favicon: getFavicon(data),
+      accessedAt: data.accessedAt,
+      synced: false
+    };
+    // Try backend sync
+    sendDataToBackend(data, (backendId) => {
+      meta.synced = true;
+      meta.backendId = backendId;
+      storePageLocally(meta);
+    });
+    // If backend unreachable, queue for later
+    // (handled in sendDataToBackend's catch)
   }
 });
 
-// Process and store page data
-function processPageData(data) {
-  // Check for duplicate page data before processing (skip on reload/revisit)
-  if (isPageDataDuplicate(data.url)) {
-    console.log('Skipping duplicate page data extraction for URL:', data.url);
-    return;
-  }
-  
-  // Add page data type for consistency
-  data.type = 'page_data';
-  
-  // Store page data separately or with visits (depending on your preference)
-  chrome.storage.local.get({ visits: [] }, result => {
-    const visits = result.visits;
-    visits.push(data);
-    chrome.storage.local.set({ visits });
-    console.log('Processing new page data:', data.url);
-    console.log('Recived Page Data', data);
-  });
-}
-
-// Process and store PDF data
-function processPDFData(data) {
-  // Check for duplicate PDF data before processing
-  if (isPageDataDuplicate(data.url)) {
-    console.log('Skipping duplicate PDF data extraction for URL:', data.url);
-    return;
-  }
-  
-  // Add PDF data type for consistency
-  data.type = 'pdf_data';
-  
-  // Store PDF data with visits
-  chrome.storage.local.get({ visits: [] }, result => {
-    const visits = result.visits;
-    visits.push(data);
-    chrome.storage.local.set({ visits });
-    console.log('Processing new PDF data:', data.url);
-  });
-}
-
-// Send PDF URL to local backend for processing
-function sendToBackend(url) {
-  // TODO: Implement backend communication
-  console.log('Send PDF URL to backend:', url);
-}
+// Periodic cleanup and sync
+setInterval(() => {
+  cleanupLocalStorage();
+  syncPendingPages();
+}, SYNC_INTERVAL);
 

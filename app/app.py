@@ -107,7 +107,7 @@ if __name__ == "__main__":
     import uvicorn
     
     uvicorn.run(
-        "app.main:app",
+        "app.app:app",
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,

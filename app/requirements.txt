@@ -1,0 +1,47 @@
+# Research Board Backend Dependencies
+
+# FastAPI and related packages
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+
+# Configuration and validation
+pydantic==2.5.0
+pydantic-settings==2.0.3
+python-dotenv==1.0.0
+
+# CORS and middleware
+fastapi-cors==0.0.6
+
+# Development dependencies
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+
+# AI/ML dependencies (for future features)
+# sentence-transformers==2.2.2
+# transformers==4.35.2
+# torch==2.1.1
+# numpy==1.24.4
+
+# Optional: For advanced text processing
+# nltk==3.8.1
+# spacy==3.7.2
+
+# Logging and monitoring
+structlog==23.2.0
+
+# Testing
+factory-boy==3.3.1
+faker==20.1.0
+
+# Content extraction and HTML parsing
+readability-lxml==0.8.1
+beautifulsoup4==4.12.3

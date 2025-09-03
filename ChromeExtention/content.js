@@ -40,7 +40,7 @@
     };
   }
 
-  // Send data to background script
+  // Send scraped data to background script
   function sendData() {
     const data = collectPageData();
     chrome.runtime.sendMessage({ type: 'PAGE_DATA', data });

@@ -152,11 +152,3 @@ The SQLite database is automatically created on first run. Tables are created us
 - **Development**: Python 3.8+, Virtual environments
 - **Platform**: macOS optimized (Apple Silicon)
 
-## 📝 License
-
-[Add your license here]
-
-## 🤝 Contributing
-
-[Add contribution guidelines here]
-A multimodal desktop research assistant that helps you collect, organize, and analyze your browsing activity using AI-powered summarization, semantic search, and explainable recommendations. Built for students and researchers, research-board integrates browser data, local storage, and local LLMs to provide insightful research support

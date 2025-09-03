@@ -12,7 +12,7 @@ import os
 # Add the project root to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from app.main import app
+from app.app import app
 
 client = TestClient(app)
 
