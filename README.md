@@ -79,10 +79,12 @@ research-board/
 ### Database Models
 
 - **`Page`**: Web pages and PDFs with metadata, content, and AI analysis
-- **`Highlight`**: User-selected content with context and annotations
-- **`History`**: Browsing sessions with interaction metrics
-- **`SearchQuery`**: Search logs for improving recommendations
-- **`Tag`**: Content organization and categorization
+- **`Image`**: Images associated with pages
+- **`PDF`**: PDF-specific metadata for pages
+- **`Embedding`**: Vector embeddings for semantic search
+- **`PageTimeSpent`**: Time spent tracking for pages
+- **`History`**: Browsing activity and interactions
+- **`User`**: User information for personalization
 
 ## 🔧 Configuration
 
@@ -112,11 +114,15 @@ Current endpoints (see `/api/v1/docs` for interactive documentation):
 
 - `GET /` - Welcome message
 - `GET /health` - Health check
-- `GET /api/v1/pages` - List pages with pagination
-- `GET /api/v1/highlights` - List highlights
-- `GET /api/v1/history` - Browsing history
-- `GET /api/v1/search` - Search functionality
-- `GET /api/v1/stats` - Application statistics
+- `POST /api/v1/pages` - Create a new page with related data
+- `GET /api/v1/pages/{id}` - Get page details with images and metadata
+- `GET /api/v1/pages` - List pages with filtering and pagination
+- `PATCH /api/v1/pages/{id}/access` - Update page access timestamp
+- `POST /api/v1/pages/{id}/embedding` - Add embedding to a page
+- `POST /api/v1/pages/{id}/time-spent` - Track time spent on a page
+- `GET /api/v1/history` - Browse history with filtering
+- `POST /api/v1/search/semantic` - Vector similarity search
+- `POST /api/v1/collect` - Collect page data from Chrome extension
 
 ### Database Management
 
@@ -138,9 +144,11 @@ The SQLite database is automatically created on first run. Tables are created us
 
 ## 🎯 Roadmap
 
-- [ ] Chrome Extension integration endpoints
+- [x] SQLite persistence with SQLAlchemy
+- [x] Chrome Extension integration endpoints
+- [ ] Vector search with sqlite-vss
 - [ ] AI summarization with local LLMs
-- [ ] Semantic search implementation
+- [ ] Semantic search optimization
 - [ ] Desktop app API integration
 - [ ] Export/import functionality
 - [ ] Advanced analytics and insights
@@ -148,7 +156,73 @@ The SQLite database is automatically created on first run. Tables are created us
 ## 🛠️ Tech Stack
 
 - **Backend**: FastAPI, SQLAlchemy, SQLite
-- **AI/ML**: Planned integration with local LLMs (Llama.cpp, Transformers)
+- **Database**: SQLite with foreign key constraints
+- **AI/ML**: NumPy for vector operations, planned sqlite-vss integration
 - **Development**: Python 3.8+, Virtual environments
 - **Platform**: macOS optimized (Apple Silicon)
+
+## 📋 SQLite Database Schema
+
+### Table: page
+- `id` (PK, autoincrement)
+- `url` (text, unique, not null)
+- `title` (text, nullable)
+- `author` (text, nullable)
+- `publish_date` (datetime, nullable)
+- `content_html` (text, cleaned HTML or extracted text for PDFs)
+- `highlight` (text, user highlighted snippet; nullable)
+- `page_type` (varchar(10), values: 'web' or 'pdf')
+- `created_at` (datetime, default now)
+- `accessed_at` (datetime, last access timestamp, nullable)
+
+### Table: image
+- `id` (PK)
+- `page_id` (FK → page.id ON DELETE CASCADE)
+- `image_url` (text, not null)
+- `alt_text` (text, nullable)
+- `created_at` (datetime default now)
+
+### Table: pdf
+- `id` (PK)
+- `page_id` (FK → page.id UNIQUE ON DELETE CASCADE)
+- `file_path` (text)
+- `num_pages` (integer)
+- `size_bytes` (integer)
+
+### Table: embedding
+- `id` (PK)
+- `page_id` (FK → page.id ON DELETE CASCADE, indexed)
+- `embedding` (BLOB; stored as float32 vector)
+- `model_name` (text)
+- `created_at` (datetime default now)
+
+### Table: page_time_spent
+- `id` (PK)
+- `page_id` (FK → page.id UNIQUE ON DELETE CASCADE)
+- `total_seconds` (integer, default 0)
+- `last_updated` (datetime)
+
+### Table: history
+- `id` (PK)
+- `page_id` (FK → page.id ON DELETE CASCADE, indexed)
+- `accessed_at` (datetime, default now)
+- `action` (varchar(20)) // e.g. 'opened', 'closed', 'highlighted'
+- `session_id` (text, nullable)
+
+### Table: user
+- `id` (PK)
+- `name` (text)
+- `email` (text, unique nullable)
+
+## 🚀 Running the Application
+
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Start the application
+uvicorn app.main:app --reload
+```
+
+Database file path: `./data/app.db` (created automatically if it doesn't exist)
 

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # Database Configuration
-    DATABASE_URL: str = "sqlite:///./research_board.db"
+    DATABASE_URL: str = "sqlite:///./data/app.db"
     DATABASE_ECHO: bool = False  # Set to True for SQL query logging
     
     # CORS Configuration
@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     
     # Application Settings
     MAX_PAGE_CONTENT_LENGTH: int = 50000  # Maximum content length to store
+    MAX_CONTENT_LEN: int = 500000  # Maximum content_html length before truncation
+                                   # Long HTML content will be truncated to avoid database issues
     MAX_HIGHLIGHTS_PER_PAGE: int = 100    # Maximum highlights per page
     ENABLE_SEMANTIC_SEARCH: bool = True
     
