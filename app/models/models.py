@@ -26,24 +26,18 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=True)
 
 class Page(Base):
-    """Primary model for storing web, PDF, and remember pages."""
+    """Primary model for storing web and PDF pages."""
     __tablename__ = "pages"
     
     id = Column(Integer, primary_key=True)
-    # UNIQUE constraint removed from url column to allow duplicate entries
-    # Manual migration if table exists:
-    # 1. ALTER TABLE pages RENAME TO pages_old;
-    # 2. Create new table without unique constraint
-    # 3. INSERT INTO pages SELECT * FROM pages_old;
-    # 4. DROP TABLE pages_old;
-    url = Column(Text, nullable=False, index=True)
+    url = Column(Text, unique=True, nullable=False, index=True)
     title = Column(Text, nullable=True)
     author = Column(Text, nullable=True)
     publish_date = Column(DateTime, nullable=True)
     content_html = Column(Text, nullable=True)  # Cleaned HTML or extracted text for PDFs
-    highlight = Column(Text, nullable=True)  # Single highlight, used for legacy quick highlights
-                                            # "remember" flow will use its own separate page row
-    page_type = Column(String(10), nullable=False)  # 'web', 'pdf', or 'remember'
+    text = Column(Text, nullable=True)  # Cleaned plain text from content processor
+    highlight = Column(Text, nullable=True)  # Single highlight, TODO: create separate table for multiple highlights
+    page_type = Column(String(10), nullable=False)  # 'web' or 'pdf'
     created_at = Column(DateTime, default=now, nullable=False)
     accessed_at = Column(DateTime, nullable=True)
     
@@ -55,7 +49,7 @@ class Page(Base):
     history_entries = relationship("History", back_populates="page", cascade="all, delete-orphan")
     
     __table_args__ = (
-        CheckConstraint("page_type IN ('web', 'pdf', 'remember')", name="valid_page_type"),
+        CheckConstraint("page_type IN ('web', 'pdf')", name="valid_page_type"),
     )
 
 class Image(Base):

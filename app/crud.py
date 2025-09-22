@@ -7,7 +7,7 @@ operations on database models, abstracting SQL operations.
 
 from sqlalchemy.orm import Session, joinedload, contains_eager
 from sqlalchemy import func, select, desc, text
-from typing import List, Optional, Tuple, Dict, Any, Union
+from typing import List, Optional, Tuple, Dict, Any
 import datetime
 import struct
 import numpy as np
@@ -16,13 +16,9 @@ from app.models.models import (
     History, User, now
 )
 from app.schemas import (
-    PageCreate, ImageCreate, PDFCreate, EmbeddingCreate, EmbeddingCreateRequest,
+    PageCreate, ImageCreate, PDFCreate, EmbeddingCreate,
     HistoryCreate, PageType, HistoryAction
 )
-from app.config import settings
-import logging
-
-logger = logging.getLogger(__name__)
 
 # Helper functions for vector conversions
 def float_list_to_bytes(vector: List[float]) -> bytes:
@@ -39,7 +35,6 @@ def bytes_to_float_list(binary_data: bytes) -> List[float]:
 def create_page(db: Session, page_data: PageCreate) -> Page:
     """
     Create a new page record with optional related data (images, PDF, embeddings).
-    Always creates a NEW page record (no upsert/merge based on URL).
     
     Args:
         db: Database session
@@ -48,22 +43,14 @@ def create_page(db: Session, page_data: PageCreate) -> Page:
     Returns:
         Created Page instance with relationships populated
     """
-    # Check if content_html exceeds max length and truncate if needed
-    content_html = page_data.content_html
-    if content_html and len(content_html) > settings.MAX_CONTENT_LEN:
-        logger.warning(
-            f"Content HTML for URL {page_data.url} exceeds MAX_CONTENT_LEN "
-            f"({len(content_html)} > {settings.MAX_CONTENT_LEN}). Truncating."
-        )
-        content_html = content_html[:settings.MAX_CONTENT_LEN]
-    
     # Create the base page object
     db_page = Page(
         url=page_data.url,
         title=page_data.title,
         author=page_data.author,
         publish_date=page_data.publish_date,
-        content_html=content_html,
+        content_html=page_data.content_html,
+        text=page_data.text,
         highlight=page_data.highlight,
         page_type=page_data.page_type,
         created_at=now(),
@@ -86,24 +73,17 @@ def create_page(db: Session, page_data: PageCreate) -> Page:
     
     # Create PDF record if provided
     if page_data.pdf and page_data.page_type == PageType.PDF:
-        # For PDF type, make sure we have at least the file_path
         db_pdf = PDF(
             page_id=db_page.id,
             file_path=page_data.pdf.file_path,
-            # Default to 1 page and 0 bytes if not provided
-            num_pages=page_data.pdf.num_pages or 1,
-            size_bytes=page_data.pdf.size_bytes or 0
+            num_pages=page_data.pdf.num_pages,
+            size_bytes=page_data.pdf.size_bytes
         )
         db.add(db_pdf)
     
     # Create embeddings if provided
     if page_data.embeddings:
-        for embedding_request in page_data.embeddings:
-            # Convert from EmbeddingCreateRequest to EmbeddingCreate
-            embedding_data = EmbeddingCreate(
-                model_name=embedding_request.model_name,
-                embedding=embedding_request.vector
-            )
+        for embedding_data in page_data.embeddings:
             add_embedding(db, db_page.id, embedding_data)
     
     # Log the page creation in history
@@ -146,52 +126,6 @@ def get_page(db: Session, page_id: int, include_embedding: bool = False) -> Opti
         )
     
     return query.first()
-
-
-def get_page_by_url(
-    db: Session, 
-    url: str, 
-    include_remember: bool = False,
-    include_embedding: bool = False
-) -> Optional[Page]:
-    """
-    Get the most recent page with a specific URL.
-    
-    Args:
-        db: Database session
-        url: URL to search for
-        include_remember: Whether to include 'remember' type pages
-        include_embedding: Whether to include raw embedding vectors
-        
-    Returns:
-        Most recent Page instance with the given URL, or None if not found
-    """
-    query = db.query(Page).filter(Page.url == url)
-    
-    # Exclude 'remember' pages unless explicitly requested
-    if not include_remember:
-        query = query.filter(Page.page_type != PageType.REMEMBER)
-    
-    # Always load these relationships
-    query = query.options(
-        joinedload(Page.images),
-        joinedload(Page.pdf),
-        joinedload(Page.time_spent)
-    )
-    
-    # Conditionally load embeddings
-    if include_embedding:
-        query = query.options(joinedload(Page.embeddings))
-    else:
-        # Just load metadata without the actual vectors
-        query = query.options(
-            joinedload(Page.embeddings).load_only(
-                Embedding.id, Embedding.model_name, Embedding.created_at
-            )
-        )
-    
-    # Order by most recent (highest ID) and return the first
-    return query.order_by(Page.id.desc()).first()
 
 def get_pages(
     db: Session, 
@@ -262,8 +196,7 @@ def update_page(db: Session, page_id: int, page_data: Dict[str, Any]) -> Optiona
 def update_page_access(
     db: Session, 
     page_id: int, 
-    time_spent_seconds: Optional[int] = None,
-    log_action: bool = True
+    time_spent_seconds: Optional[int] = None
 ) -> Optional[Page]:
     """
     Update a page's accessed_at timestamp and optionally add to time spent.
@@ -272,7 +205,6 @@ def update_page_access(
         db: Database session
         page_id: ID of the page to update
         time_spent_seconds: Optional seconds to add to the total time spent
-        log_action: Whether to log this access in the history table
         
     Returns:
         Updated Page instance, or None if not found
@@ -302,8 +234,7 @@ def update_page_access(
             db.add(db_time_spent)
     
     # Log the access in history
-    if log_action:
-        log_history(db, page_id, HistoryAction.ACCESSED)
+    log_history(db, page_id, HistoryAction.OPENED)
     
     db.commit()
     db.refresh(db_page)
@@ -392,32 +323,20 @@ def get_page_with_images(db: Session, page_id: int) -> Optional[Page]:
     ).filter(Page.id == page_id).first()
 
 # Embedding CRUD operations
-def add_embedding(
-    db: Session, 
-    page_id: int, 
-    embedding_data: Union[EmbeddingCreate, EmbeddingCreateRequest]
-) -> Embedding:
+def add_embedding(db: Session, page_id: int, embedding_data: EmbeddingCreate) -> Embedding:
     """
     Add an embedding vector to a page.
     
     Args:
         db: Database session
         page_id: ID of the page
-        embedding_data: Embedding data including vector and model name.
-          Can be either EmbeddingCreate (with 'embedding' field) or 
-          EmbeddingCreateRequest (with 'vector' field).
+        embedding_data: Embedding data including vector and model name
         
     Returns:
         Created Embedding instance
     """
-    # Extract the vector from either embedding or vector field
-    if hasattr(embedding_data, 'embedding'):
-        vector = embedding_data.embedding
-    else:
-        vector = embedding_data.vector
-        
     # Convert the float array to binary blob
-    binary_embedding = float_list_to_bytes(vector)
+    binary_embedding = float_list_to_bytes(embedding_data.embedding)
     
     db_embedding = Embedding(
         page_id=page_id,
@@ -546,38 +465,6 @@ def log_history(
     db.add(db_history)
     db.flush()
     return db_history
-
-def create_history(db: Session, history_data: HistoryCreate) -> History:
-    """
-    Create a new history entry.
-    
-    Args:
-        db: Database session
-        history_data: History data including page_id and action
-        
-    Returns:
-        Created History instance
-    """
-    # Create history record
-    db_history = History(
-        page_id=history_data.page_id,
-        action=history_data.action,
-        accessed_at=now(),
-        session_id=history_data.session_id if hasattr(history_data, 'session_id') else None
-    )
-    
-    db.add(db_history)
-    db.flush()
-    
-    # Update the page's accessed_at timestamp when a page is viewed
-    if history_data.action == HistoryAction.PAGE_VIEW:
-        page = db.query(Page).filter(Page.id == history_data.page_id).first()
-        if page:
-            page.accessed_at = now()
-    
-    db.commit()
-    return db_history
-
 
 def get_history(
     db: Session, 

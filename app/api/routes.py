@@ -5,7 +5,7 @@ This module defines the main API router and route handlers for handling
 web page data, highlights, history, and search functionality.
 """
 
-from typing import List, Optional, Any, Dict, Union
+from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Request, status, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -16,9 +16,9 @@ from app.content_processor import ContentProcessor
 from app.models.models import now
 from app.schemas import (
     PageCreate, PageDetailRead, PageBasicRead, PageUpdate, 
-    PageAccessUpdate, EmbeddingCreate, EmbeddingCreateRequest, TimeSpentBase, 
+    PageAccessUpdate, EmbeddingCreate, TimeSpentBase, 
     SemanticSearchQuery, SearchResult, MessageResponse, 
-    HistoryCreate, HistoryRead, PageType, ImageCreate, HistoryAction
+    HistoryRead, PageType, ImageCreate
 )
 import app.crud as crud
 
@@ -58,8 +58,13 @@ def create_page(
     - PDF metadata (if page_type is 'pdf')
     - Embeddings
     """
-    # Always create a new page - duplicate URLs are now allowed
-    # This enables capturing page changes over time
+    # Check if a page with the same URL already exists
+    existing_page = db.query(crud.Page).filter(crud.Page.url == page_data.url).first()
+    if existing_page:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Page with URL '{page_data.url}' already exists"
+        )
     
     return crud.create_page(db=db, page_data=page_data)
 
@@ -116,15 +121,11 @@ def update_page_access(
 )
 def add_page_embedding(
     page_id: int, 
-    embedding_data: Union[EmbeddingCreate, EmbeddingCreateRequest],
+    embedding_data: EmbeddingCreate,
     db: Session = Depends(get_db)
 ):
     """
     Add a new embedding vector to an existing page.
-    
-    Accepts embedding data in two formats:
-    - EmbeddingCreate with 'embedding' field for backwards compatibility
-    - EmbeddingCreateRequest with 'vector' field for new clients
     """
     # Check if page exists
     db_page = db.query(crud.Page).filter(crud.Page.id == page_id).first()
@@ -174,40 +175,12 @@ def list_pages(
     List pages with optional filtering and pagination.
     
     Query Parameters:
-    - page_type: Filter by page type ('web', 'pdf', or 'remember')
+    - page_type: Filter by page type ('web' or 'pdf')
     - q: Search query text (searches title and URL)
     - limit: Maximum number of results (default: 20, max: 100)
     - offset: Number of results to skip (for pagination)
     """
     return crud.get_pages(db, page_type=page_type, query_text=q, limit=limit, offset=offset)
-
-
-@router.get(
-    "/pages/by-url",
-    response_model=Optional[PageDetailRead],
-    tags=["Pages"]
-)
-def get_page_by_url(
-    url: str = Query(..., description="URL to search for"),
-    include_remember: bool = Query(False, description="Include remember-type pages in search"),
-    db: Session = Depends(get_db)
-):
-    """
-    Find the most recent page matching the provided URL.
-    
-    By default, excludes 'remember' type pages unless specifically requested.
-    Returns null if no matching page is found.
-    
-    Query Parameters:
-    - url: The URL to search for
-    - include_remember: Whether to include 'remember' type pages (default: false)
-    """
-    page = crud.get_page_by_url(
-        db=db, 
-        url=url,
-        include_remember=include_remember
-    )
-    return page
 
 
 @router.get(
@@ -230,33 +203,6 @@ def list_history(
     - offset: Number of results to skip (for pagination)
     """
     return crud.get_history(db, page_id=page_id, limit=limit, offset=offset)
-
-
-@router.post(
-    "/history",
-    response_model=HistoryRead,
-    status_code=status.HTTP_201_CREATED,
-    tags=["History"]
-)
-def create_history_entry(
-    history_data: HistoryCreate,
-    db: Session = Depends(get_db)
-):
-    """
-    Create a new history entry for a page.
-    
-    Records a user interaction event such as PAGE_VIEW, PAGE_CREATED, etc.
-    """
-    # Check if the page exists
-    page = db.query(crud.Page).filter(crud.Page.id == history_data.page_id).first()
-    if page is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Page with ID {history_data.page_id} not found"
-        )
-    
-    # Create history entry
-    return crud.create_history(db=db, history_data=history_data)
 
 
 @router.post(
@@ -346,6 +292,7 @@ async def collect_content(request: Request, db: Session = Depends(get_db)):
             author=result.get("author"),
             publish_date=result.get("publish_date"),
             content_html=result["html"],
+            text=result["text"],
             page_type=PageType.WEB,
             images=[
                 ImageCreate(

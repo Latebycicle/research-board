@@ -15,7 +15,6 @@ class PageType(str, Enum):
     """Valid page types."""
     WEB = "web"
     PDF = "pdf"
-    REMEMBER = "remember"  # New type for remember pages
 
 
 class HistoryAction(str, Enum):
@@ -23,7 +22,6 @@ class HistoryAction(str, Enum):
     OPENED = "opened"
     CLOSED = "closed"
     HIGHLIGHTED = "highlighted"
-    ACCESSED = "accessed"  # New action type
 
 
 # Base schemas
@@ -36,22 +34,14 @@ class ImageBase(BaseModel):
 class PDFBase(BaseModel):
     """Base schema for PDF metadata."""
     file_path: str
-    num_pages: Optional[int] = None
-    size_bytes: Optional[int] = None
+    num_pages: int
+    size_bytes: int
 
 
 class EmbeddingBase(BaseModel):
     """Base schema for embedding vectors."""
     model_name: str
-    embedding: List[float]  # Will be renamed to vector in API requests
-    
-    model_config = {"protected_namespaces": ()}
-
-
-class EmbeddingCreateRequest(BaseModel):
-    """Schema for embedding in API requests."""
-    model_name: str
-    vector: List[float]  # Using 'vector' instead of 'embedding' in API
+    embedding: List[float]
     
     model_config = {"protected_namespaces": ()}
 
@@ -95,12 +85,13 @@ class PageCreate(BaseModel):
     title: Optional[str] = None
     author: Optional[str] = None
     publish_date: Optional[datetime.datetime] = None
-    content_html: str
+    content_html: Optional[str] = None
+    text: Optional[str] = None
     highlight: Optional[str] = None
     page_type: PageType
     images: Optional[List[ImageCreate]] = None
-    pdf: Optional[PDFCreate] = None  # Required only when page_type='pdf'
-    embeddings: Optional[List[EmbeddingCreateRequest]] = None  # Optional embeddings with vector field
+    pdf: Optional[PDFCreate] = None
+    embeddings: Optional[List[EmbeddingCreate]] = None
 
 
 class HistoryCreate(HistoryBase):
@@ -191,6 +182,7 @@ class PageDetailRead(PageBasicRead):
     author: Optional[str] = None
     publish_date: Optional[datetime.datetime] = None
     content_html: Optional[str] = None
+    text: Optional[str] = None
     highlight: Optional[str] = None
     images: List[ImageRead] = []
     pdf: Optional[PDFRead] = None
@@ -212,15 +204,10 @@ class PageUpdate(BaseModel):
     """Schema for updating page data."""
     title: Optional[str] = None
     author: Optional[str] = None
+    publish_date: Optional[datetime.datetime] = None
+    content_html: Optional[str] = None
+    text: Optional[str] = None
     highlight: Optional[str] = None
-    accessed_at: Optional[datetime.datetime] = None  # Allow manual timestamp updates
-
-
-class HistoryCreateRequest(BaseModel):
-    """Schema for creating a history entry via API."""
-    page_id: int
-    action: str
-    session_id: Optional[str] = None
 
 
 class PageAccessUpdate(BaseModel):
