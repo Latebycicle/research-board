@@ -25,11 +25,13 @@ black==23.11.0
 flake8==6.1.0
 mypy==1.7.1
 
+
 # AI/ML dependencies
 numpy==1.24.4
-# sentence-transformers==2.2.2
+sentence-transformers
+torch
+sqlite-vss
 # transformers==4.35.2
-# torch==2.1.1
 
 # Text processing
 readability-lxml>=0.8.1

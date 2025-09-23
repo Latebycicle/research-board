@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, status, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
+import httpx
 
 from app.db.database import get_db
 from app.content_processor import ContentProcessor
@@ -17,13 +18,28 @@ from app.models.models import now
 from app.schemas import (
     PageCreate, PageDetailRead, PageBasicRead, PageUpdate, 
     PageAccessUpdate, EmbeddingCreate, TimeSpentBase, 
-    SemanticSearchQuery, SearchResult, MessageResponse, 
+    SemanticSearchRequest, SearchResult, MessageResponse, 
     HistoryRead, PageType, ImageCreate
 )
 import app.crud as crud
 
 # Set up logger
+# Set up logger
 logger = logging.getLogger(__name__)
+
+# Ollama embedding helper
+async def get_embedding(text: str) -> list[float]:
+    """Call Ollama API to generate embedding for the given text."""
+    logger.info("Generating embedding...")
+    url = "http://127.0.0.1:11434/api/embeddings"
+    payload = {"model": "embeddinggemma:latest", "prompt": text}
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        embedding = data.get("embedding", [])
+        logger.info(f"Embedding received. First 5 values: {embedding[:5]}")
+        return embedding
 
 # Create API router
 router = APIRouter()
@@ -205,34 +221,40 @@ def list_history(
     return crud.get_history(db, page_id=page_id, limit=limit, offset=offset)
 
 
+
+# --- New Semantic Search Endpoint ---
+import asyncio
+from app.models.models import Page
+
 @router.post(
-    "/search/semantic", 
+    "/search/semantic",
     response_model=List[SearchResult],
     tags=["Search"]
 )
-def semantic_search(
-    query: SemanticSearchQuery,
+async def semantic_search(
+    request: SemanticSearchRequest,
     db: Session = Depends(get_db)
 ):
     """
-    Perform semantic similarity search using a vector.
-    
-    Currently uses a basic cosine similarity implementation.
-    TODO: Replace with sqlite-vss for better performance.
+    Perform semantic search over all pages using a text query.
+    1. Generate embedding for the query using Ollama.
+    2. Use sqlite-vss to find top_k most similar pages.
+    3. Return results with page info and similarity score.
     """
-    # Perform the search
-    results = crud.semantic_search(
-        db, 
-        query.vector, 
-        model_name=query.model_name, 
-        top_k=query.top_k
-    )
-    
-    # Format the results
+    # 1. Generate embedding for the query
+    embedding = await get_embedding(request.query)
+    if not embedding or len(embedding) != 768:
+        raise HTTPException(status_code=500, detail="Failed to generate embedding for query.")
+
+    # 2. Perform vector search
+    results = crud.semantic_search(db, embedding, top_k=request.top_k)
+    page_ids = [page_id for page_id, _ in results]
+    pages = {p.id: p for p in crud.get_pages_by_ids(db, page_ids)}
+
+    # 3. Format results
     search_results = []
     for page_id, score in results:
-        # Get basic page info
-        page = db.query(crud.Page).filter(crud.Page.id == page_id).first()
+        page = pages.get(page_id)
         search_results.append(
             SearchResult(
                 page_id=page_id,
@@ -240,7 +262,6 @@ def semantic_search(
                 page=page if page else None
             )
         )
-    
     return search_results
 
 
@@ -285,6 +306,10 @@ async def collect_content(request: Request, db: Session = Depends(get_db)):
             logger.error(f"[ResearchBoard] ContentProcessor error: {result['error']}")
             return JSONResponse(status_code=400, content={"error": result["error"]})
         
+
+        # Generate embedding using Ollama
+        embedding = await get_embedding(result["text"])
+
         # Prepare page data
         page_data = PageCreate(
             url=url,
@@ -302,12 +327,12 @@ async def collect_content(request: Request, db: Session = Depends(get_db)):
                 for img in images_data if img.get("src")
             ]
         )
-        
+
         # Store in database
         try:
-            page = crud.create_page(db=db, page_data=page_data)
+            page = crud.create_page(db=db, page_data=page_data, embedding=embedding)
             logger.info(f"[ResearchBoard] Stored page id {page.id} for url {url}")
-            
+
             return {
                 "success": True,
                 "page_id": page.id,

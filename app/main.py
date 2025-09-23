@@ -13,7 +13,14 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.db.database import engine, Base
+from sqlalchemy import text
+
 from app.api.routes import router as api_router
+
+import app.crud as crud
+import os
+from app.vector_store import faiss_index
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,9 +37,28 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up Research Board backend...")
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
-    
+
+    # Create/load FAISS index
+    from sqlalchemy.orm import Session
+    session = Session(bind=engine)
+    if os.path.exists(faiss_index.index_path):
+        logger.info(f"Loading FAISS index from {faiss_index.index_path}")
+        faiss_index.load_index()
+    else:
+        logger.info("Building FAISS index from database embeddings...")
+        all_embeddings = crud.get_all_embeddings(session)
+        if all_embeddings:
+            faiss_index.index.reset()
+            for page_id, vector in all_embeddings:
+                faiss_index.add(page_id, vector)
+            faiss_index.save_index()
+            logger.info("FAISS index built and saved.")
+        else:
+            logger.info("No embeddings found in database; FAISS index is empty.")
+    session.close()
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Research Board backend...")
 
@@ -113,34 +139,3 @@ if __name__ == "__main__":
         reload=settings.DEBUG,
         log_level="info"
     )
-
-
-"""
-# Research Board API Changes - September 2025
-
-## Key Changes
-
-1. Added support for duplicate URLs (removed uniqueness constraint)
-   - Pages are now created as new entries each time
-   - Use /pages/by-url endpoint to get the latest page for a URL
-
-2. Extended page_type to include 'remember' pages
-   - Valid types: 'web', 'pdf', 'remember' 
-   - By default, get_page_by_url excludes 'remember' pages
-
-3. Added content_html truncation 
-   - If exceeding MAX_CONTENT_LEN (500,000 chars)
-   - Prevents database issues with extremely large pages
-
-4. New endpoints:
-   - GET /pages/by-url - Find most recent page by URL
-   - POST /history - Log user interaction events
-
-5. Enhanced embedding support:
-   - Both 'embedding' and 'vector' field names supported
-   - More flexible API for different client versions
-
-## Migration Notes
-- Existing unique URL constraint was removed
-- Added index on page.url for faster lookups
-"""

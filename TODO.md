@@ -1,0 +1,2 @@
+- [ ] Impliment EmbeddingGemma best practices for storing and retrieval of data.
+- [ ] 

@@ -1,3 +1,8 @@
+# Import the global faiss_index
+from app.vector_store import faiss_index
+# Add logging import and logger instance
+import logging
+logger = logging.getLogger(__name__)
 """
 CRUD operations for database entities.
 
@@ -32,14 +37,14 @@ def bytes_to_float_list(binary_data: bytes) -> List[float]:
     return [float(round(x, 8)) for x in float_array]
 
 # Page CRUD operations
-def create_page(db: Session, page_data: PageCreate) -> Page:
+def create_page(db: Session, page_data: PageCreate, embedding: Optional[list[float]] = None) -> Page:
     """
-    Create a new page record with optional related data (images, PDF, embeddings).
+    Create a new page record with optional related data (images, PDF, embeddings, and direct embedding vector).
     
     Args:
         db: Database session
         page_data: Page data including optional nested resources
-        
+        embedding: Optional embedding vector to store (from Ollama)
     Returns:
         Created Page instance with relationships populated
     """
@@ -58,7 +63,7 @@ def create_page(db: Session, page_data: PageCreate) -> Page:
     )
     db.add(db_page)
     db.flush()  # Get the ID without committing
-    
+
     # Create the time spent record
     db_time_spent = PageTimeSpent(
         page_id=db_page.id,
@@ -66,11 +71,11 @@ def create_page(db: Session, page_data: PageCreate) -> Page:
         last_updated=now()
     )
     db.add(db_time_spent)
-    
+
     # Create related images if provided
     if page_data.images:
         add_images(db, db_page.id, page_data.images)
-    
+
     # Create PDF record if provided
     if page_data.pdf and page_data.page_type == PageType.PDF:
         db_pdf = PDF(
@@ -80,18 +85,37 @@ def create_page(db: Session, page_data: PageCreate) -> Page:
             size_bytes=page_data.pdf.size_bytes
         )
         db.add(db_pdf)
-    
+
     # Create embeddings if provided
     if page_data.embeddings:
         for embedding_data in page_data.embeddings:
             add_embedding(db, db_page.id, embedding_data)
-    
+
+    # If embedding vector is provided, store it as an Embedding
+    if embedding is not None:
+        from app.schemas import EmbeddingCreate
+        embedding_data = EmbeddingCreate(model_name="embedding-gemma", embedding=embedding)
+        add_embedding(db, db_page.id, embedding_data)
+
     # Log the page creation in history
     log_history(db, db_page.id, HistoryAction.OPENED)
-    
+
     db.commit()
     db.refresh(db_page)
+    # Add new embedding to FAISS index if present
+    if embedding is not None:
+        faiss_index.add(db_page.id, embedding)
+        faiss_index.save_index()
     return db_page
+# Helper to get all embeddings as (page_id, vector) tuples
+def get_all_embeddings(db: Session):
+    from app.models.models import Embedding
+    embeddings = db.query(Embedding.page_id, Embedding.embedding).all()
+    result = []
+    for page_id, emb_blob in embeddings:
+        vec = np.frombuffer(emb_blob, dtype=np.float32)
+        result.append((page_id, vec.tolist()))
+    return result
 
 def get_page(db: Session, page_id: int, include_embedding: bool = False) -> Optional[Page]:
     """
@@ -382,61 +406,23 @@ def get_latest_embedding_by_model(
         Embedding.model_name == model_name
     ).order_by(Embedding.created_at.desc()).first()
 
-def semantic_search(
-    db: Session, 
-    query_vector: List[float], 
-    model_name: Optional[str] = None, 
-    top_k: int = 5
-) -> List[Tuple[int, float]]:
-    """
-    Perform semantic similarity search across all embeddings.
-    
-    Args:
-        db: Database session
-        query_vector: The vector to search for
-        model_name: Optional filter by model name
-        top_k: Number of results to return
-        
-    Returns:
-        List of tuples (page_id, similarity_score) sorted by similarity
-    """
-    # Convert query vector to numpy array
-    query_np = np.array(query_vector, dtype=np.float32)
-    
-    # Get all embeddings, optionally filtered by model
-    query = db.query(Embedding.id, Embedding.page_id, Embedding.embedding)
-    if model_name:
-        query = query.filter(Embedding.model_name == model_name)
-    
-    embeddings = query.all()
-    
-    # If no embeddings found, return empty list
-    if not embeddings:
-        return []
-    
-    # Calculate similarities
-    results = []
-    for embedding_id, page_id, binary_embedding in embeddings:
-        # Convert binary blob back to numpy array
-        embedding_np = np.frombuffer(binary_embedding, dtype=np.float32)
-        
-        # Calculate cosine similarity
-        # Note: For production, replace with more efficient vector search like sqlite-vss
-        norm_q = np.linalg.norm(query_np)
-        norm_e = np.linalg.norm(embedding_np)
-        
-        # Avoid division by zero
-        if norm_q == 0 or norm_e == 0:
-            similarity = 0
-        else:
-            similarity = np.dot(query_np, embedding_np) / (norm_q * norm_e)
-        
-        results.append((page_id, float(similarity)))
-    
-    # Sort by similarity (descending) and return top_k
-    results.sort(key=lambda x: x[1], reverse=True)
-    return results[:top_k]
 
+# --- Definitive, correct semantic_search using table-valued function ---
+def semantic_search(db: Session, query_vector: list[float], top_k: int = 10) -> list[tuple[int, float]]:
+    # Use the global FAISS index for semantic search
+    return faiss_index.search(query_vector, top_k)
+
+# Efficiently fetch a list of Page objects by IDs
+def get_pages_by_ids(db: Session, page_ids: list[int]) -> list[Page]:
+    if not page_ids:
+        return []
+    return db.query(Page).filter(Page.id.in_(page_ids)).all()
+
+# Efficiently fetch a list of Page objects by IDs
+def get_pages_by_ids(db: Session, page_ids: list[int]) -> list[Page]:
+    if not page_ids:
+        return []
+    return db.query(Page).filter(Page.id.in_(page_ids)).all()
 # History CRUD operations
 def log_history(
     db: Session, 
@@ -501,7 +487,6 @@ def create_user(db: Session, name: str, email: Optional[str] = None) -> User:
         db: Database session
         name: User name
         email: Optional email address
-        
     Returns:
         Created User instance
     """

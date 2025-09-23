@@ -216,11 +216,12 @@ class PageAccessUpdate(BaseModel):
 
 
 # Search schemas
-class SemanticSearchQuery(BaseModel):
-    """Schema for semantic search requests."""
-    vector: List[float]
-    top_k: int = Field(default=5, gt=0)
-    model_name: Optional[str] = None
+
+# --- Semantic Search Request Schema ---
+class SemanticSearchRequest(BaseModel):
+    """Schema for semantic search requests (text query, not vector)."""
+    query: str
+    top_k: int = 5
 
 
 class SearchResult(BaseModel):
