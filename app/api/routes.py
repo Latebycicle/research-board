@@ -5,13 +5,13 @@ This module defines the main API router and route handlers for handling
 web page data, highlights, history, and search functionality.
 """
 
+from app.schemas import ChatRequest
 from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Request, status, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 import logging
 import httpx
-
 from app.db.database import get_db
 from app.content_processor import ContentProcessor
 from app.models.models import now
@@ -22,6 +22,10 @@ from app.schemas import (
     HistoryRead, PageType, ImageCreate
 )
 import app.crud as crud
+
+
+
+router = APIRouter()
 
 # Set up logger
 # Set up logger
@@ -34,7 +38,7 @@ async def get_embedding(text: str) -> list[float]:
     url = "http://127.0.0.1:11434/api/embeddings"
     payload = {"model": "embeddinggemma:latest", "prompt": text}
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload)
+        response = await client.post(url, json=payload, timeout=60.0)
         response.raise_for_status()
         data = response.json()
         embedding = data.get("embedding", [])
@@ -42,7 +46,52 @@ async def get_embedding(text: str) -> list[float]:
         return embedding
 
 # Create API router
-router = APIRouter()
+
+
+# --- RAG Chat Endpoint ---
+@router.post("/chat", tags=["Chat"])
+async def rag_chat(request: ChatRequest, db: Session = Depends(get_db)):
+    """
+    RAG chat endpoint: retrieves relevant context and sends a prompt to Ollama for completion.
+    """
+    # 1. Get embedding for the query
+    embedding = await get_embedding(request.query)
+    if not embedding or len(embedding) != 768:
+        raise HTTPException(status_code=500, detail="Failed to generate embedding for query.")
+
+    # 2. Retrieve top 3-4 relevant pages
+    results = crud.semantic_search(db, embedding, top_k=4)
+    page_ids = [page_id for page_id, _ in results]
+    pages = crud.get_pages_by_ids(db, page_ids)
+
+    # 3. Build context from page texts
+    context_chunks = []
+    sources = []
+    for page in pages:
+        if page.text:
+            context_chunks.append(f"[Source: {page.title}]\n{page.text.strip()}\n")
+            sources.append({"id": page.id, "title": page.title, "url": page.url})
+    context = "\n---\n".join(context_chunks)
+
+    # 4. Construct prompt for Ollama
+    prompt = (
+        "You are a research assistant. Use the following context from the user's reading history to answer the question.\n"
+        f"Context:\n{context}\n"
+        f"\nQuestion: {request.query}\n"
+        "\nIf you use information from a source, cite it by title in your answer."
+    )
+
+    # 5. Call Ollama's chat completion endpoint
+    ollama_url = "http://127.0.0.1:11434/api/chat"
+    payload = {"model": "gpt-oss:20b", "messages": [{"role": "user", "content": prompt}]}
+    async with httpx.AsyncClient() as client:
+        response = await client.post(ollama_url, json=payload, timeout=60.0)
+        response.raise_for_status()
+        data = response.json()
+        answer = data.get("message", data.get("response", ""))
+
+    return {"answer": answer, "sources": sources}
+
 
 
 @router.get("/health", tags=["Health"])

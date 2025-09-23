@@ -76,11 +76,17 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    # UPDATE THIS LIST
+    allow_origins=[
+        "http://localhost:1420", 
+        "tauri://localhost", 
+        "http://localhost"
+    ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Include API router
 app.include_router(api_router, prefix=settings.API_PREFIX)

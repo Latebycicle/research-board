@@ -1,3 +1,9 @@
+from pydantic import BaseModel, Field, HttpUrl, constr, validator
+
+# --- RAG Chat Request Schema ---
+
+class ChatRequest(BaseModel):
+    query: str
 """
 Pydantic schemas for API request and response validation.
 
