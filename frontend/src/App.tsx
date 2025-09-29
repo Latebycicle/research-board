@@ -1,44 +1,50 @@
-
-import Sidebar from "./Sidebar";
-import React, { useState } from "react";
-
-import PageViewer from "./components/PageViewer";
-import ChatView from "./components/ChatView";
-
+import { useState } from "react";
+import reactLogo from "./assets/react.svg";
+import { invoke } from "@tauri-apps/api/core";
+import "./App.css";
 
 function App() {
-  const [selectedPageId, setSelectedPageId] = useState<number | null>(null);
-  const [view, setView] = useState<"page" | "chat">("page");
+  const [greetMsg, setGreetMsg] = useState("");
+  const [name, setName] = useState("");
+
+  async function greet() {
+    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+    setGreetMsg(await invoke("greet", { name }));
+  }
 
   return (
-    <div className="flex h-screen w-screen">
-      <Sidebar setSelectedPageId={(id) => { setSelectedPageId(id); setView("page"); }} />
-      <main className="flex-1 flex flex-col items-center justify-center bg-white">
-        <div className="w-full flex justify-end p-2">
-          <button
-            className={`mr-2 px-4 py-2 rounded ${view === "page" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-            onClick={() => setView("page")}
-          >
-            Page View
-          </button>
-          <button
-            className={`px-4 py-2 rounded ${view === "chat" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-            onClick={() => setView("chat")}
-          >
-            Chat
-          </button>
-        </div>
-        <div className="flex-1 w-full flex items-center justify-center">
-          {view === "chat" ? (
-            <ChatView />
-          ) : selectedPageId ? (
-            <PageViewer pageId={selectedPageId} />
-          ) : (
-            <span className="text-gray-500 text-xl">Select an item from the sidebar</span>
-          )}
-        </div>
-      </main>
-    </div>
+    <main className="container">
+      <h1>Welcome to Tauri + React</h1>
+
+      <div className="row">
+        <a href="https://vite.dev" target="_blank">
+          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
+        </a>
+        <a href="https://tauri.app" target="_blank">
+          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
+        </a>
+        <a href="https://react.dev" target="_blank">
+          <img src={reactLogo} className="logo react" alt="React logo" />
+        </a>
+      </div>
+      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
+
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          greet();
+        }}
+      >
+        <input
+          id="greet-input"
+          onChange={(e) => setName(e.currentTarget.value)}
+          placeholder="Enter a name..."
+        />
+        <button type="submit">Greet</button>
+      </form>
+      <p>{greetMsg}</p>
+    </main>
   );
 }
 
